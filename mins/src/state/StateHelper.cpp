@@ -19,6 +19,7 @@
 #include "utils/Print_Logger.h"
 #include "utils/chi_square.h"
 #include "utils/colors.h"
+#include <stdexcept>
 
 using namespace ov_core;
 using namespace ov_type;
@@ -107,6 +108,9 @@ bool StateHelper::EKFUpdate(shared_ptr<State> state, const VEC_TYPE &H_order, co
   // Part of the Kalman Gain K = (P*H^T)*S^{-1} = M*S^{-1}
   assert(res.rows() == R.rows());
   assert(H.rows() == res.rows());
+  if (!H.allFinite() || !res.allFinite() || !R.allFinite() || !state->cov.allFinite()) {
+    throw std::runtime_error("[EKF] Non-finite input to " + type);
+  }
   MatrixXd M_a = MatrixXd::Zero(state->cov.rows(), res.rows());
 
   // Get the location in small jacobian for each measuring variable
@@ -141,11 +145,18 @@ bool StateHelper::EKFUpdate(shared_ptr<State> state, const VEC_TYPE &H_order, co
 
   // Compute Kalman gain
   MatrixXd Sinv = MatrixXd::Identity(R.rows(), R.rows());
-  S.selfadjointView<Upper>().llt().solveInPlace(Sinv);
+  Eigen::LLT<MatrixXd> innovation_llt(S.selfadjointView<Upper>());
+  if (innovation_llt.info() != Eigen::Success) {
+    throw std::runtime_error("[EKF] Innovation covariance is not positive definite: " + type);
+  }
+  Sinv = innovation_llt.solve(Sinv).eval();
   MatrixXd K = M_a * Sinv.selfadjointView<Upper>();
 
   // dx, dx_Cov
   VectorXd dx = K * res;
+  if (!K.allFinite() || !dx.allFinite()) {
+    throw std::runtime_error("[EKF] Non-finite correction: " + type);
+  }
   MatrixXd dx_Cov(state->cov.rows(), state->cov.rows());
   dx_Cov.triangularView<Upper>() = (K * M_a.transpose());
 

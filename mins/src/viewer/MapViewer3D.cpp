@@ -104,7 +104,6 @@ bool MapViewer3D::start() {
 
     const std::string& path = configPath_.empty() ? generatedConfigPath_ : configPath_;
 
-    setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     setenv("QT_QPA_PLATFORM", "xcb", 0);
 
     std::vector<char*> arguments = {

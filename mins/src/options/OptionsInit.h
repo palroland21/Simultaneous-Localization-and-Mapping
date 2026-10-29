@@ -32,6 +32,11 @@ struct OptionsInit {
   /// Variance threshold on our acceleration to be classified as moving
   double imu_thresh = 1.0;
 
+  /// Maximum accelerometer and gyroscope sample deviation in the stationary window.
+  double imu_static_accel_std = 0.15;
+  double imu_static_gyro_std = 0.02;
+  bool imu_wait_for_jerk = true;
+
   /// Threshold for smoothness check of the initialization
   double imu_wheel_thresh = 0.1;
 

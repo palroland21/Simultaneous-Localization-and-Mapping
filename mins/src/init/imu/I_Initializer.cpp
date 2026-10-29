@@ -34,7 +34,7 @@ bool I_Initializer::initialization(Matrix<double, 17, 1> &imustate) {
   double oldesttime = imu_pp->imu_data.front().timestamp;
 
   // Return if we don't have enough for two windows
-  if (newesttime - oldesttime < 2 * op->init->window_time) {
+  if (newesttime - oldesttime < (op->init->imu_wait_for_jerk ? 2.0 : 1.0) * op->init->window_time) {
     PRINT0(YELLOW "[INIT-IMU]: unable to select window of IMU readings, not enough readings\n" RESET);
     return false;
   }
@@ -48,6 +48,11 @@ bool I_Initializer::initialization(Matrix<double, 17, 1> &imustate) {
     if (data.timestamp > newesttime - 2 * op->init->window_time && data.timestamp <= newesttime - 1 * op->init->window_time) {
       window_2to1.push_back(data);
     }
+  }
+
+  // A verified stationary start does not require a later acceleration spike.
+  if (!op->init->imu_wait_for_jerk) {
+    window_2to1 = window_1to0;
   }
 
   // Return if both of these failed
@@ -82,11 +87,23 @@ bool I_Initializer::initialization(Matrix<double, 17, 1> &imustate) {
     a_var_2to1 += (data.am - a_avg_2to1).dot(data.am - a_avg_2to1);
   }
   a_var_2to1 = std::sqrt(a_var_2to1 / ((int)window_2to1.size() - 1));
+  double gyro_var = 0.0;
+  for (const ImuData &data : window_2to1) {
+    gyro_var += (data.wm - w_avg_2to1).squaredNorm();
+  }
+  double gyro_std = std::sqrt(gyro_var / (window_2to1.size() - 1));
+  if (newesttime - last_diagnostic_time >= 1.0) {
+    PRINT2("[INIT-CHECK] t=%.6f old_acc_std=%.6f old_gyro_std=%.6f new_acc_std=%.6f gyro_mean=[%.6f,%.6f,%.6f]\n", newesttime, a_var_2to1, gyro_std, a_var_1to0, w_avg_2to1(0), w_avg_2to1(1), w_avg_2to1(2));
+    last_diagnostic_time = newesttime;
+  }
+  if (!std::isfinite(a_var_2to1) || !std::isfinite(a_var_1to0) || !std::isfinite(gyro_std) || a_var_2to1 > op->init->imu_static_accel_std || gyro_std > op->init->imu_static_gyro_std) {
+    return false;
+  }
   // PRINT2(BOLDGREEN "[INIT-IMU]: IMU excitation, %.4f,%.4f\n" RESET, a_var_1to0, a_var_2to1);
 
   // If it is below the threshold and we want to wait till we detect a jerk
-  if (a_var_1to0 < op->init->imu_thresh) {
-    PRINT2(YELLOW "[INIT-IMU]: %.2f no IMU excitation, below threshold %.4f < %.4f\n" RESET, newesttime, a_var_1to0, op->init->imu_thresh);
+  if (op->init->imu_wait_for_jerk && a_var_1to0 < op->init->imu_thresh) {
+    PRINT1(YELLOW "[INIT-IMU]: %.2f no IMU excitation, below threshold %.4f < %.4f\n" RESET, newesttime, a_var_1to0, op->init->imu_thresh);
     return false;
   }
 

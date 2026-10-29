@@ -79,6 +79,18 @@ public:
   void reset_service(std::shared_ptr<std_srvs::srv::Empty::Request> request, std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
 private:
+  double last_imu_time = -1.0;
+  double last_camera_time = -1.0;
+  double imu_period = 0.0;
+  double camera_period = 0.0;
+  double last_flow_report = -1.0;
+  size_t received_imu = 0;
+  size_t received_camera = 0;
+  size_t imu_gaps = 0;
+  size_t camera_gaps = 0;
+
+  bool record_camera_time(double timestamp);
+
   /// Global node handler
   shared_ptr<rclcpp::Node> node;
 

@@ -25,6 +25,7 @@ private:
 
     std::array<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr, CAMERA_COUNT> subscriptions_;
     std::array<cv::Mat, CAMERA_COUNT> images_;
+    std::array<bool, CAMERA_COUNT> windowSized_{};
 
     std::mutex imageMutex_;
 };

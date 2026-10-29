@@ -23,17 +23,17 @@ static const std::array<std::string, 3> windows = {
     "MINS - Stereo Feature Tracking"
 };
 
+static const std::array<cv::Size, 3> windowSizes = {cv::Size(480, 306), cv::Size(480, 306), cv::Size(1128, 360)};
+
 CameraViewer::CameraViewer(const rclcpp::Node::SharedPtr& node) {
     for (std::size_t i = 0; i < CAMERA_COUNT; i++) {
-        subscriptions_[i] = node->create_subscription<sensor_msgs::msg::Image>(
-            topics[i], rclcpp::SensorDataQoS(),
-            [this, i](sensor_msgs::msg::Image::ConstSharedPtr msg) {
-                receiveImage(i, msg);
-            }
-        );
+        auto callback = [this, i](sensor_msgs::msg::Image::ConstSharedPtr msg) {
+            receiveImage(i, msg);
+        };
+        subscriptions_[i] = node->create_subscription<sensor_msgs::msg::Image>(topics[i], rclcpp::SensorDataQoS(), callback);
 
-        cv::namedWindow(windows[i], cv::WINDOW_NORMAL);
-        cv::resizeWindow(windows[i], 640, 480);
+        cv::namedWindow(windows[i], cv::WINDOW_NORMAL | cv::WINDOW_KEEPRATIO | cv::WINDOW_GUI_NORMAL);
+        cv::resizeWindow(windows[i], windowSizes[i]);
     }
 }
 
@@ -66,12 +66,17 @@ bool CameraViewer::render() {
     }
 
     for (std::size_t i = 0; i < CAMERA_COUNT; i++) {
+        bool hasImage = !frames[i].empty();
         if (frames[i].empty()) {
-            frames[i] = cv::Mat::zeros(480, 640, CV_8UC3);
-            cv::putText(frames[i], "Waiting for images...", cv::Point(110, 240), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
+            frames[i] = cv::Mat::zeros(windowSizes[i], CV_8UC3);
+            cv::putText(frames[i], "Waiting for images...", cv::Point(30, windowSizes[i].height / 2), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
         }
 
         cv::imshow(windows[i], frames[i]);
+        if (hasImage && !windowSized_[i]) {
+            cv::resizeWindow(windows[i], windowSizes[i]);
+            windowSized_[i] = true;
+        }
     }
 
     int key = cv::waitKey(1);

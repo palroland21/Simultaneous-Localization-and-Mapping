@@ -9,6 +9,7 @@
 
 #include "Initializer.h"
 #include "feat/FeatureDatabase.h"
+#include "feat/Feature.h"
 #include "imu/I_Initializer.h"
 #include "imu_wheel/IW_Initializer.h"
 #include "options/Options.h"
@@ -93,6 +94,48 @@ bool Initializer::try_initializtion() {
   if (!init_success) {
     delete_old_measurements();
     return false;
+  }
+
+  // IMU variance alone cannot distinguish rest from translation at constant speed.
+  // Require tracks spanning the same stationary interval before assuming zero velocity.
+  if (i_init && state->op->cam->enabled && !state->op->init->imu_wait_for_jerk) {
+    double end = imustate(0);
+    double begin = end - state->op->init->window_time;
+    std::vector<double> displacements;
+    auto database = up_cam->trackDATABASE.begin()->second;
+    for (const auto &entry : database->get_internal_data()) {
+      const auto &feature = entry.second;
+      for (const auto &camera : feature->timestamps) {
+        const auto &times = camera.second;
+        auto first = std::lower_bound(times.begin(), times.end(), begin);
+        auto last = std::upper_bound(times.begin(), times.end(), end);
+        if (first == times.end() || last == times.begin()) {
+          continue;
+        }
+        --last;
+        if (*first > begin + 0.1 || *last < end - 0.1 || last <= first) {
+          continue;
+        }
+        size_t index = std::distance(times.begin(), first);
+        const auto &uvs = feature->uvs.at(camera.first);
+        double displacement = 0.0;
+        for (auto sample = first; sample <= last; ++sample) {
+          displacement = std::max(displacement, static_cast<double>((uvs.at(std::distance(times.begin(), sample)) - uvs.at(index)).norm()));
+        }
+        displacements.push_back(displacement);
+      }
+    }
+    if (displacements.size() < 20) {
+      delete_old_measurements();
+      return false;
+    }
+    auto median = displacements.begin() + displacements.size() / 2;
+    std::nth_element(displacements.begin(), median, displacements.end());
+    if (!std::isfinite(*median) || *median > 1.0) {
+      delete_old_measurements();
+      return false;
+    }
+    PRINT2("[INIT-CHECK] stationary visual window=[%.6f,%.6f] tracks=%zu median_max_displacement=%.4f px\n", begin, end, displacements.size(), *median);
   }
 
   // Success! Set the state variables

@@ -26,6 +26,7 @@ if(NOT COMMAND ament_target_dependencies)
 endif()
 
 find_package(rclcpp REQUIRED)
+find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2 REQUIRED COMPONENTS rmw_adapters message_filters rosbag2_storage_builtin)
 find_package(tf2_ros REQUIRED COMPONENTS tf2_cpp)  # Replaces tf
 
@@ -160,6 +161,9 @@ target_link_libraries(simulation mins_lib)
 add_executable(subscribe src/run_subscribe.cpp)
 target_link_libraries(subscribe mins_lib)
 
+add_executable(bag src/run_bag.cpp)
+target_link_libraries(bag mins_lib rosbag2_cpp::rosbag2_cpp)
+
 
 target_sources(subscribe PRIVATE src/viewer/CameraViewer.cpp src/viewer/MapViewer3D.cpp)
 
@@ -167,7 +171,7 @@ ament_target_dependencies(subscribe rclcpp sensor_msgs cv_bridge)
 target_link_libraries(subscribe ${OpenCV_LIBRARIES})
 
 # Install executables
-install(TARGETS subscribe simulation DESTINATION lib/${PROJECT_NAME})
+install(TARGETS subscribe simulation bag DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch/)
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config/)

@@ -117,12 +117,49 @@ ROS2Subscriber::ROS2Subscriber(std::shared_ptr<rclcpp::Node> node, std::shared_p
 void ROS2Subscriber::callback_inertial(const Imu::SharedPtr msg) {
   // convert into correct format & send it to our system
   ov_core::ImuData imu = ROS2Helper::Imu2Data(msg);
+  double dt = imu.timestamp - last_imu_time;
+  if (last_imu_time >= 0.0 && dt <= 0.0) {
+    PRINT3("[FLOW] Ignoring non-monotonic IMU: previous=%.9f current=%.9f\n", last_imu_time, imu.timestamp);
+    return;
+  }
+  if (last_imu_time >= 0.0) {
+    imu_period = imu_period > 0.0 ? std::min(imu_period, dt) : dt;
+    if (dt > 1.5 * imu_period) {
+      ++imu_gaps;
+      PRINT3("[FLOW] IMU gap: t=%.9f dt=%.6f expected=%.6f\n", imu.timestamp, dt, imu_period);
+    }
+  }
+  last_imu_time = imu.timestamp;
+  ++received_imu;
   if (sys->feed_measurement_imu(imu)) {
     pub->visualize();
   }
   pub->publish_imu();
+  if (imu.timestamp - last_flow_report >= 5.0) {
+    PRINT2("[FLOW] imu=%zu camera=%zu imu_gaps=%zu camera_gaps=%zu imu_time=%.6f camera_time=%.6f\n", received_imu, received_camera, imu_gaps, camera_gaps, last_imu_time, last_camera_time);
+    last_flow_report = imu.timestamp;
+  }
   PRINT1(YELLOW "[SUB] IMU measurement: %.3f" RESET, imu.timestamp);
   PRINT1(YELLOW "|%.3f,%.3f,%.3f|%.3f,%.3f,%.3f\n" RESET, imu.wm(0), imu.wm(1), imu.wm(2), imu.am(0), imu.am(1), imu.am(2));
+}
+
+bool ROS2Subscriber::record_camera_time(double timestamp) {
+  // These aggregate diagnostics apply to the primary camera/stereo stream.
+  double dt = timestamp - last_camera_time;
+  if (last_camera_time >= 0.0 && dt <= 0.0) {
+    PRINT3("[FLOW] Ignoring non-monotonic camera: previous=%.9f current=%.9f\n", last_camera_time, timestamp);
+    return false;
+  }
+  if (last_camera_time >= 0.0) {
+    camera_period = camera_period > 0.0 ? std::min(camera_period, dt) : dt;
+    if (dt > 1.5 * camera_period) {
+      ++camera_gaps;
+      PRINT3("[FLOW] Camera gap: t=%.9f dt=%.6f expected=%.6f\n", timestamp, dt, camera_period);
+    }
+  }
+  last_camera_time = timestamp;
+  ++received_camera;
+  return true;
 }
 
 void ROS2Subscriber::callback_monocular_I(const Image::ConstSharedPtr msg, int cam_id) {
@@ -130,6 +167,9 @@ void ROS2Subscriber::callback_monocular_I(const Image::ConstSharedPtr msg, int c
   //
   ov_core::CameraData cam;
   if (ROS2Helper::Image2Data(msg, cam_id, cam, op->cam)) {
+    if (cam_id == 0 && !record_camera_time(cam.timestamp)) {
+      return;
+    }
     sys->feed_measurement_camera(cam);
     pub->publish_cam_images(cam_id);
     PRINT1(YELLOW "[SUB] MONO Cam measurement: %.3f|%d\n" RESET, cam.timestamp, cam_id);
@@ -140,6 +180,9 @@ void ROS2Subscriber::callback_monocular_C(const CompressedImage::ConstSharedPtr 
   // convert into correct format & send it to our system
   ov_core::CameraData cam;
   if (ROS2Helper::Image2Data(msg, cam_id, cam, op->cam)) {
+    if (cam_id == 0 && !record_camera_time(cam.timestamp)) {
+      return;
+    }
     sys->feed_measurement_camera(cam);
     pub->publish_cam_images(cam_id);
     PRINT1(YELLOW "[SUB] MONO Cam measurement: %.3f|%d\n" RESET, cam.timestamp, cam_id);
@@ -147,11 +190,18 @@ void ROS2Subscriber::callback_monocular_C(const CompressedImage::ConstSharedPtr 
 }
 
 void ROS2Subscriber::callback_stereo_I(const Image::ConstSharedPtr msg0, const Image::ConstSharedPtr msg1, int cam_id0, int cam_id1) {
+  if (rclcpp::Time(msg0->header.stamp).nanoseconds() != rclcpp::Time(msg1->header.stamp).nanoseconds()) {
+    PRINT3("[FLOW] Rejecting stereo pair with different timestamps: %.9f %.9f\n", rclcpp::Time(msg0->header.stamp).seconds(), rclcpp::Time(msg1->header.stamp).seconds());
+    return;
+  }
   // convert into correct format & send it to our system
   ov_core::CameraData cam;
   bool success0 = ROS2Helper::Image2Data(msg0, cam_id0, cam, op->cam);
   bool success1 = ROS2Helper::Image2Data(msg1, cam_id1, cam, op->cam);
   if (success0 && success1) {
+    if (cam_id0 == 0 && !record_camera_time(cam.timestamp)) {
+      return;
+    }
     sys->feed_measurement_camera(cam);
     pub->publish_cam_images({cam_id0, cam_id1});
     PRINT1(YELLOW "[SUB] STEREO Cam measurement: %.3f|%d|%d\n" RESET, cam.timestamp, cam_id0, cam_id1);
@@ -162,11 +212,18 @@ void ROS2Subscriber::callback_stereo_I(const Image::ConstSharedPtr msg0, const I
 
 
 void ROS2Subscriber::callback_stereo_C(const CompressedImage::ConstSharedPtr msg0, const CompressedImage::ConstSharedPtr msg1, int cam_id0, int cam_id1) {
+  if (rclcpp::Time(msg0->header.stamp).nanoseconds() != rclcpp::Time(msg1->header.stamp).nanoseconds()) {
+    PRINT3("[FLOW] Rejecting stereo pair with different timestamps: %.9f %.9f\n", rclcpp::Time(msg0->header.stamp).seconds(), rclcpp::Time(msg1->header.stamp).seconds());
+    return;
+  }
   // convert into correct format & send it to our system
   ov_core::CameraData cam;
   bool success0 = ROS2Helper::Image2Data(msg0, cam_id0, cam, op->cam);
   bool success1 = ROS2Helper::Image2Data(msg1, cam_id1, cam, op->cam);
   if (success0 && success1) {
+    if (cam_id0 == 0 && !record_camera_time(cam.timestamp)) {
+      return;
+    }
     sys->feed_measurement_camera(cam);
     pub->publish_cam_images({cam_id0, cam_id1});
     PRINT1(YELLOW "[SUB] STEREO Cam measurement: %.3f|%d|%d\n" RESET, rclcpp::Time(msg0->header.stamp).seconds(), cam_id0, cam_id1);
@@ -207,4 +264,7 @@ void ROS2Subscriber::callback_lidar(const PointCloud2::SharedPtr msg, int lidar_
 void ROS2Subscriber::reset_service(std::shared_ptr<std_srvs::srv::Empty::Request> request, std::shared_ptr<std_srvs::srv::Empty::Response> response) {
   sys->init();
   pub->reset_paths();
+  last_imu_time = last_camera_time = last_flow_report = -1.0;
+  imu_period = camera_period = 0.0;
+  received_imu = received_camera = imu_gaps = camera_gaps = 0;
 }

@@ -7,6 +7,120 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#if ROS_AVAILABLE == 2
+#include "core/ROS2Helper.h"
+#include "core/SystemManager.h"
+#include "options/Options.h"
+#include "options/OptionsCamera.h"
+#include "options/OptionsEstimator.h"
+#include "options/OptionsIMU.h"
+#include "options/OptionsInit.h"
+#include "state/State.h"
+#include "types/IMU.h"
+#include "utils/opencv_yaml_parse.h"
+#include "utils/sensor_data.h"
+#include <rosbag2_cpp/reader.hpp>
+#include <fstream>
+#include <iomanip>
+#include <map>
+
+// Deterministic camera/IMU replay: no DDS queues, GUI, or ground-truth initialization.
+int main(int argc, char **argv) {
+  if (argc < 3) {
+    std::cerr << "Usage: bag CONFIG BAG_DIRECTORY [DURATION_SECONDS] [TRAJECTORY_FILE]\n";
+    return EXIT_FAILURE;
+  }
+  rclcpp::init(argc, argv);
+  auto parser = std::make_shared<ov_core::YamlParser>(argv[1]);
+  auto options = std::make_shared<mins::Options>();
+  options->load_print(parser);
+  if (!parser->successful() || options->est->init->use_gt) {
+    std::cerr << "Invalid configuration or ground-truth initialization requested.\n";
+    return EXIT_FAILURE;
+  }
+  auto sys = std::make_shared<mins::SystemManager>(options->est);
+  rosbag2_cpp::Reader reader;
+  reader.open(argv[2]);
+  double duration = argc > 3 ? std::stod(argv[3]) : -1.0;
+  double start = -1.0;
+  double latest_imu = -1.0;
+  double last_camera = -1.0;
+  size_t imu_count = 0;
+  size_t camera_count = 0;
+  std::map<int64_t, std::map<int, sensor_msgs::msg::Image::SharedPtr>> pending;
+  std::ofstream trajectory;
+  if (argc > 4) {
+    trajectory.open(argv[4]);
+    if (!trajectory) {
+      throw std::runtime_error("Cannot open trajectory output");
+    }
+    trajectory << std::setprecision(16);
+  }
+  while (reader.has_next() && rclcpp::ok()) {
+    auto record = reader.read_next();
+    double record_time = record->recv_timestamp * 1e-9;
+    if (start < 0.0) {
+      start = record_time;
+    }
+    if (duration > 0.0 && record_time - start > duration) {
+      break;
+    }
+    if (record->topic_name == options->est->imu->topic) {
+      auto msg = std::make_shared<sensor_msgs::msg::Imu>();
+      rclcpp::SerializedMessage serialized(*record->serialized_data);
+      rclcpp::Serialization<sensor_msgs::msg::Imu>().deserialize_message(&serialized, msg.get());
+      auto imu = mins::ROS2Helper::Imu2Data(msg);
+      if (imu.timestamp <= latest_imu) {
+        throw std::runtime_error("Non-monotonic IMU timestamp");
+      }
+      latest_imu = imu.timestamp;
+      bool cloned = sys->feed_measurement_imu(imu);
+      ++imu_count;
+      if (cloned && trajectory) {
+        auto p = sys->state->imu->pos();
+        auto q = sys->state->imu->quat();
+        trajectory << sys->state->time << ' ' << p.transpose() << ' ' << q.transpose() << '\n';
+      }
+    } else {
+      for (size_t camera_id = 0; camera_id < options->est->cam->topic.size(); ++camera_id) {
+        if (record->topic_name != options->est->cam->topic.at(camera_id)) {
+          continue;
+        }
+        auto msg = std::make_shared<sensor_msgs::msg::Image>();
+        rclcpp::SerializedMessage serialized(*record->serialized_data);
+        rclcpp::Serialization<sensor_msgs::msg::Image>().deserialize_message(&serialized, msg.get());
+        pending[rclcpp::Time(msg->header.stamp).nanoseconds()][camera_id] = msg;
+      }
+    }
+    while (!pending.empty()) {
+      auto it = pending.begin();
+      double t = it->first * 1e-9;
+      if (t > latest_imu || it->second.size() < static_cast<size_t>(options->est->cam->max_n)) {
+        break;
+      }
+      if (t <= last_camera) {
+        throw std::runtime_error("Non-monotonic camera timestamp");
+      }
+      ov_core::CameraData cam;
+      for (const auto &image : it->second) {
+        if (!mins::ROS2Helper::Image2Data(image.second, image.first, cam, options->est->cam)) {
+          throw std::runtime_error("Cannot decode camera image");
+        }
+      }
+      sys->feed_measurement_camera(cam);
+      last_camera = t;
+      ++camera_count;
+      pending.erase(it);
+    }
+    if (!sys->state->imu->value().allFinite() || !sys->state->cov.allFinite()) {
+      throw std::runtime_error("Non-finite estimator state or covariance");
+    }
+  }
+  std::cout << "[REPLAY] IMU=" << imu_count << " stereo=" << camera_count << " pending=" << pending.size() << " initialized=" << sys->state->initialized << "\n";
+  rclcpp::shutdown();
+  return sys->state->initialized ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+#else
 #include "core/ROSHelper.h"
 #include "core/ROSPublisher.h"
 #include "core/SystemManager.h"
@@ -449,3 +563,4 @@ void system_setup(int argc, char **argv) {
   // Create state log files
   save = make_shared<State_Logger>(op);
 }
+#endif

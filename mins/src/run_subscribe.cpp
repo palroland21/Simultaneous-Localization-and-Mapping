@@ -73,11 +73,16 @@ int main(int argc, char **argv) {
   }
 
 #if ROS_AVAILABLE == 2
-  CameraViewer cameraViewer(node);
+  bool showViewers = true;
+  node->get_parameter_or("show_viewers", showViewers, true);
+  std::unique_ptr<CameraViewer> cameraViewer;
   MapViewer3D mapViewer;
 
-  if (!mapViewer.start()) {
-    RCLCPP_WARN(node->get_logger(), "Failed to start 3D viewer.");
+  if (showViewers) {
+    cameraViewer = std::make_unique<CameraViewer>(node);
+    if (!mapViewer.start()) {
+      RCLCPP_WARN(node->get_logger(), "Failed to start 3D viewer.");
+    }
   }
 
   rclcpp::executors::MultiThreadedExecutor executor;
@@ -85,7 +90,7 @@ int main(int argc, char **argv) {
 
   std::thread rosThread([&executor]() { executor.spin(); });
 
-  while (rclcpp::ok() && cameraViewer.render()) {
+  while (rclcpp::ok() && (!cameraViewer || cameraViewer->render())) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 

@@ -13,6 +13,7 @@
 #include "utils/Jabdongsani.h"
 #include "utils/Print_Logger.h"
 #include "utils/chi_square.h"
+#include <stdexcept>
 
 using namespace mins;
 
@@ -95,7 +96,20 @@ bool UpdaterStatistics::get_chi2(double &chi, double &thr, const MatrixXd &P, co
 
   // test chi
   MatrixXd S = (H * P * H.transpose() + R).selfadjointView<Upper>();
-  chi = res.transpose() * S.inverse().selfadjointView<Upper>() * res;
+  if (res.size() == 0 || !P.allFinite() || !H.allFinite() || !R.allFinite() || !res.allFinite() || !S.allFinite()) {
+    throw std::runtime_error("[CHI2] Empty or non-finite input: " + type);
+  }
+  Eigen::LLT<MatrixXd> innovation_llt(S);
+  if (innovation_llt.info() != Eigen::Success) {
+    Eigen::SelfAdjointEigenSolver<MatrixXd> spectrum_P(P.selfadjointView<Upper>(), Eigen::EigenvaluesOnly);
+    Eigen::SelfAdjointEigenSolver<MatrixXd> spectrum_S(S, Eigen::EigenvaluesOnly);
+    PRINT4("[CHI2-FAIL] rows=%ld cols=%ld H_max=%.9e res_max=%.9e R_min=%.9e P_eigen=[%.9e,%.9e] S_eigen=[%.9e,%.9e]\n", H.rows(), H.cols(), H.cwiseAbs().maxCoeff(), res.cwiseAbs().maxCoeff(), R.diagonal().minCoeff(), spectrum_P.eigenvalues().minCoeff(), spectrum_P.eigenvalues().maxCoeff(), spectrum_S.eigenvalues().minCoeff(), spectrum_S.eigenvalues().maxCoeff());
+    throw std::runtime_error("[CHI2] Innovation covariance is not positive definite: " + type);
+  }
+  chi = res.dot(innovation_llt.solve(res));
+  if (!std::isfinite(chi) || chi < 0.0) {
+    throw std::runtime_error("[CHI2] Invalid Mahalanobis distance: " + type);
+  }
   if (res.rows() < max_chi_size) {
     thr = chi2_mult * chi_squared_table[res.rows()];
   } else {

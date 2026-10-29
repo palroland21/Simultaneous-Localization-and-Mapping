@@ -353,7 +353,14 @@ void UpdaterCamera::slam_update(V_Feature &vec_features, DB_ptr db_unused) {
 
     // Check if we should delete or not
     int cam_id = (int)(*feat)->timestamps.begin()->first;
-    if (Chi.at(cam_id)->Chi2Check(state, L.Hx_order, H_xf, L.res, L.R)) {
+    bool accepted;
+    try {
+      accepted = Chi.at(cam_id)->Chi2Check(state, L.Hx_order, H_xf, L.res, L.R);
+    } catch (const std::exception &error) {
+      PRINT4("[CAM-FAIL] state_time=%.9f feature=%zu p=[%.9f,%.9f,%.9f] fej=[%.9f,%.9f,%.9f]\n", state->time, cam_feat.feat->featid, cam_feat.p_FinG(0), cam_feat.p_FinG(1), cam_feat.p_FinG(2), cam_feat.p_FinG_fej(0), cam_feat.p_FinG_fej(1), cam_feat.p_FinG_fej(2));
+      throw;
+    }
+    if (accepted) {
       // 5. With all good SLAM features update the state
       StateHelper::EKFUpdate(state, L.Hx_order, H_xf, L.res, L.R, "CAM");
     } else {

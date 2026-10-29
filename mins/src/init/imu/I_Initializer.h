@@ -25,6 +25,8 @@ public:
   bool initialization(Eigen::Matrix<double, 17, 1> &imustate);
 
 private:
+  double last_diagnostic_time = -1.0;
+
   /// Options
   std::shared_ptr<OptionsEstimator> op;
 

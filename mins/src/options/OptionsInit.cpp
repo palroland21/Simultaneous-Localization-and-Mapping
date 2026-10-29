@@ -16,6 +16,9 @@ void mins::OptionsInit::load(const std::shared_ptr<ov_core::YamlParser> &parser)
     std::string f = "config_init";
     parser->parse_external(f, "init", "window_time", window_time);
     parser->parse_external(f, "init", "imu_thresh", imu_thresh);
+    parser->parse_external(f, "init", "imu_static_accel_std", imu_static_accel_std, false);
+    parser->parse_external(f, "init", "imu_static_gyro_std", imu_static_gyro_std, false);
+    parser->parse_external(f, "init", "imu_wait_for_jerk", imu_wait_for_jerk, false);
     parser->parse_external(f, "init", "imu_wheel_thresh", imu_wheel_thresh, false);
     parser->parse_external(f, "init", "imu_only_init", imu_only_init);
     parser->parse_external(f, "init", "imu_gravity_aligned", imu_gravity_aligned, false);
@@ -29,6 +32,9 @@ void mins::OptionsInit::print() {
   PRINT1(BOLDBLUE "Options - Initialization\n" RESET);
   PRINT1("\t- window_time: %.2f\n", window_time);
   PRINT1("\t- imu_thresh: %.2f\n", imu_thresh);
+  PRINT1("\t- imu_static_accel_std: %.4f\n", imu_static_accel_std);
+  PRINT1("\t- imu_static_gyro_std: %.4f\n", imu_static_gyro_std);
+  PRINT1("\t- imu_wait_for_jerk: %s\n", imu_wait_for_jerk ? "true" : "false");
   PRINT1("\t- imu_wheel_thresh: %.2f\n", imu_wheel_thresh);
   PRINT1("\t- imu_only_init: %s\n", imu_only_init ? "true" : "false");
   PRINT1("\t- imu_gravity_aligned: %s\n", imu_gravity_aligned ? "true" : "false");
