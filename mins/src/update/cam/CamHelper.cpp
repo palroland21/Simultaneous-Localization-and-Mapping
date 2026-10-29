@@ -20,6 +20,7 @@
 #include "types/Vec.h"
 #include "utils/Jabdongsani.h"
 #include "utils/Print_Logger.h"
+#include <cstdlib>
 
 using namespace std;
 using namespace Eigen;
@@ -234,8 +235,13 @@ CamLinSys CamHelper::get_feature_jacobian_full(shared_ptr<State> state, CamFeatu
       }
 
       // Find the LLT of R inverse
-      MatrixXd R_llt = R.llt().matrixL();
-      MatrixXd R_llt_inv = R_llt.llt().solve(MatrixXd::Identity(2, 2));
+      Eigen::LLT<MatrixXd> noise_llt(R);
+      if (noise_llt.info() != Eigen::Success) {
+          PRINT4(RED "[CAM] Invalid measurement covariance during whitening.\n" RESET);
+          std::exit(EXIT_FAILURE);
+      }
+      MatrixXd R_llt = noise_llt.matrixL();
+      MatrixXd R_llt_inv = R_llt.triangularView<Eigen::Lower>().solve(MatrixXd::Identity(2, 2));
 
       // Whiten residue with the measurement noise
       linsys.res.block(2 * c, 0, 2, 1) = R_llt_inv * linsys.res.block(2 * c, 0, 2, 1);

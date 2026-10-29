@@ -224,7 +224,7 @@ cv::Mat UpdaterCamera::get_track_img(int cam_id) {
   std::string overlay = (!state->initialized) ? "init" : "";
 
   cv::Mat img_history;
-  trackFEATS.at(cam_id)->display_history(img_history, 255, 255, 0, 255, 255, 255, highlighted_ids, overlay);
+  trackFEATS.at(cam_id)->display_active(img_history, 255, 255, 0, 255, 255, 255, overlay);
   return img_history;
 }
 

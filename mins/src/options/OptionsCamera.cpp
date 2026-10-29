@@ -164,7 +164,7 @@ void mins::OptionsCamera::load_i(const std::shared_ptr<ov_core::YamlParser> &par
   parser->parse_external(f, "cam" + std::to_string(i), "topic", cam_topic);
   topic.push_back(cam_topic);
 
-  bool cam_compressed;
+  bool cam_compressed = false;
   parser->parse_external(f, "cam" + std::to_string(i), "compressed", cam_compressed, false);
   compressed.insert({i, cam_compressed});
 

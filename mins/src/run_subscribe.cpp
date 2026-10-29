@@ -8,11 +8,15 @@
  */
 
 #include <memory>
+#include <thread>
+#include <chrono>
 
 #if ROS_AVAILABLE == 2
 #include "core/ROS2Publisher.h"
 #include "core/ROS2Subscriber.h"
 #include "rclcpp/rclcpp.hpp"
+#include "viewer/CameraViewer.h"
+#include "viewer/MapViewer3D.h"
 #elif ROS_AVAILABLE == 1
 #include "core/ROSPublisher.h"
 #include "core/ROSSubscriber.h"
@@ -40,7 +44,6 @@ int main(int argc, char **argv) {
 #if ROS_AVAILABLE == 2
   rclcpp::init(argc, argv);
   rclcpp::NodeOptions options;
-
   options.allow_undeclared_parameters(true);
   options.automatically_declare_parameters_from_overrides(true);
   auto node = std::make_shared<rclcpp::Node>("mins_subscribe", options);
@@ -70,11 +73,29 @@ int main(int argc, char **argv) {
   }
 
 #if ROS_AVAILABLE == 2
-  // rclcpp::spin(node);
+  CameraViewer cameraViewer(node);
+  MapViewer3D mapViewer;
+
+  if (!mapViewer.start()) {
+    RCLCPP_WARN(node->get_logger(), "Failed to start 3D viewer.");
+  }
+
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(node);
-  executor.spin();
-  // Spin off to ROS
+
+  std::thread rosThread([&executor]() { executor.spin(); });
+
+  while (rclcpp::ok() && cameraViewer.render()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  executor.cancel();
+
+  if (rosThread.joinable()) {
+    rosThread.join();
+  }
+
+  mapViewer.stop();
 #endif
 
   // Final visualization

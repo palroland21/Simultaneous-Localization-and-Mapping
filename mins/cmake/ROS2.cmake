@@ -160,6 +160,12 @@ target_link_libraries(simulation mins_lib)
 add_executable(subscribe src/run_subscribe.cpp)
 target_link_libraries(subscribe mins_lib)
 
+
+target_sources(subscribe PRIVATE src/viewer/CameraViewer.cpp src/viewer/MapViewer3D.cpp)
+
+ament_target_dependencies(subscribe rclcpp sensor_msgs cv_bridge)
+target_link_libraries(subscribe ${OpenCV_LIBRARIES})
+
 # Install executables
 install(TARGETS subscribe simulation DESTINATION lib/${PROJECT_NAME})
 
